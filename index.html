@@ -1,0 +1,248 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+#wrap{display:flex;gap:14px;padding:8px 0;font-family:var(--font-sans,sans-serif);align-items:flex-start}
+#map-holder{flex:1;min-width:0;position:relative}
+#map-svg{width:100%;border-radius:8px;display:block}
+.tip{position:absolute;background:rgba(12,18,32,0.93);color:#fff;padding:7px 11px;border-radius:6px;font-size:11px;line-height:1.6;pointer-events:none;display:none;z-index:50;max-width:210px;white-space:nowrap}
+#leg{width:196px;flex-shrink:0}
+.ls{border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--color-background-primary)}
+.lt{font-size:10px;font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:7px}
+.li{display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:11px;color:var(--color-text-primary)}
+.ld{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+</style>
+
+<div id="wrap">
+  <div id="map-holder">
+    <svg id="map-svg" viewBox="0 0 960 600"></svg>
+    <div class="tip" id="tip"></div>
+  </div>
+  <div id="leg">
+    <div class="ls" id="aleg"><div class="lt">ACP community type</div></div>
+    <div class="ls">
+      <div class="lt">Population (2020 census est.)</div>
+      <svg id="szsvg" width="172" height="52"></svg>
+      <div style="font-size:10px;color:var(--color-text-secondary);margin-top:3px;">Labels beside dots &gt;150K. Hover for all details.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+const COLORS={
+  "Big Cities":"#1565c0","Urban Suburbs":"#039be5","College Towns":"#00897b",
+  "Exurbs":"#43a047","Middle Suburbs":"#8bc34a","Working Class Country":"#fb8c00",
+  "African American South":"#8e24aa","Hispanic Centers":"#e53935",
+  "Evangelical Hubs":"#795548","Native American Lands":"#ff7043",
+  "Rural Middle America":"#546e7a","Aging Farmlands":"#f9a825",
+  "LDS Enclaves":"#3949ab","Graying America":"#90a4ae","Military Posts":"#558b2f"
+};
+
+const cities=[
+  {n:"New York City",s:"NY",acp:"Big Cities",lat:40.7128,lng:-74.006,pop:8336817},
+  {n:"Los Angeles",s:"CA",acp:"Big Cities",lat:34.0522,lng:-118.2437,pop:3979576},
+  {n:"Chicago",s:"IL",acp:"Big Cities",lat:41.8781,lng:-87.6298,pop:2696555},
+  {n:"Houston",s:"TX",acp:"Big Cities",lat:29.7604,lng:-95.3698,pop:2304580},
+  {n:"Philadelphia",s:"PA",acp:"Big Cities",lat:39.9526,lng:-75.1652,pop:1603797},
+  {n:"Washington",s:"DC",acp:"Big Cities",lat:38.9072,lng:-77.0369,pop:689545},
+  {n:"Seattle",s:"WA",acp:"Big Cities",lat:47.6062,lng:-122.3321,pop:737255},
+  {n:"Las Vegas",s:"NV",acp:"Big Cities",lat:36.1699,lng:-115.1398,pop:641903},
+  {n:"Atlanta",s:"GA",acp:"Big Cities",lat:33.749,lng:-84.388,pop:498715},
+  {n:"Minneapolis",s:"MN",acp:"Big Cities",lat:44.9778,lng:-93.265,pop:429606},
+  {n:"Miami",s:"FL",acp:"Big Cities",lat:25.7617,lng:-80.1918,pop:442241},
+  {n:"Mesa",s:"AZ",acp:"Urban Suburbs",lat:33.4152,lng:-111.8315,pop:504258},
+  {n:"Baltimore",s:"MD",acp:"Urban Suburbs",lat:39.2904,lng:-76.6122,pop:585708},
+  {n:"Vienna",s:"VA",acp:"Urban Suburbs",lat:38.9012,lng:-77.2653,pop:16486},
+  {n:"Hartford",s:"CT",acp:"Urban Suburbs",lat:41.7658,lng:-72.6851,pop:121054},
+  {n:"Greenville",s:"SC",acp:"Urban Suburbs",lat:34.8526,lng:-82.394,pop:70720},
+  {n:"Providence",s:"RI",acp:"Urban Suburbs",lat:41.824,lng:-71.4128,pop:190934},
+  {n:"Ann Arbor",s:"MI",acp:"College Towns",lat:42.2808,lng:-83.743,pop:123851},
+  {n:"Athens",s:"GA",acp:"College Towns",lat:33.9519,lng:-83.3576,pop:127947},
+  {n:"Northampton",s:"MA",acp:"College Towns",lat:42.3251,lng:-72.6412,pop:28549},
+  {n:"Lincoln",s:"NE",acp:"College Towns",lat:40.8136,lng:-96.7026,pop:289102},
+  {n:"Gainesville",s:"FL",acp:"College Towns",lat:29.6516,lng:-82.3248,pop:133997},
+  {n:"Flagstaff",s:"AZ",acp:"College Towns",lat:35.1983,lng:-111.6513,pop:76831},
+  {n:"Siler City",s:"NC",acp:"Exurbs",lat:35.726,lng:-79.4647,pop:8006},
+  {n:"Lancaster",s:"PA",acp:"Exurbs",lat:40.0379,lng:-76.3055,pop:57960},
+  {n:"Concord",s:"NH",acp:"Exurbs",lat:43.2081,lng:-71.5376,pop:43976},
+  {n:"Portland",s:"ME",acp:"Exurbs",lat:43.6591,lng:-70.2568,pop:68408},
+  {n:"Billings",s:"MT",acp:"Exurbs",lat:45.7833,lng:-108.5007,pop:117116},
+  {n:"Westminster",s:"MD",acp:"Exurbs",lat:39.5751,lng:-76.9961,pop:19523},
+  {n:"Bend",s:"OR",acp:"Exurbs",lat:44.0582,lng:-121.3153,pop:97590},
+  {n:"Rock Springs",s:"WY",acp:"Exurbs",lat:41.5875,lng:-109.2029,pop:22965},
+  {n:"Green Bay",s:"WI",acp:"Middle Suburbs",lat:44.5133,lng:-88.0133,pop:107395},
+  {n:"Honolulu",s:"HI",acp:"Middle Suburbs",lat:21.3069,lng:-157.8583,pop:350964},
+  {n:"Pevely",s:"MO",acp:"Middle Suburbs",lat:38.2831,lng:-90.396,pop:6000},
+  {n:"Anderson",s:"IN",acp:"Middle Suburbs",lat:40.1053,lng:-85.6803,pop:54000},
+  {n:"Flint",s:"MI",acp:"Middle Suburbs",lat:43.0125,lng:-83.6875,pop:81252},
+  {n:"Chandler",s:"OK",acp:"Working Class Country",lat:35.702,lng:-96.8809,pop:3100},
+  {n:"Akron",s:"OH",acp:"Working Class Country",lat:41.0814,lng:-81.519,pop:190469},
+  {n:"Monticello",s:"AR",acp:"Working Class Country",lat:33.6287,lng:-91.7929,pop:9600},
+  {n:"Jackson",s:"MS",acp:"African American South",lat:32.2988,lng:-90.1848,pop:153701},
+  {n:"Birmingham",s:"AL",acp:"African American South",lat:33.5186,lng:-86.8104,pop:212237},
+  {n:"Goldsboro",s:"NC",acp:"African American South",lat:35.3849,lng:-77.9925,pop:34984},
+  {n:"Baton Rouge",s:"LA",acp:"African American South",lat:30.4515,lng:-91.1871,pop:227470},
+  {n:"San Antonio",s:"TX",acp:"Hispanic Centers",lat:29.4241,lng:-98.4936,pop:1434625},
+  {n:"El Paso",s:"TX",acp:"Hispanic Centers",lat:31.7619,lng:-106.485,pop:678815},
+  {n:"San Bernardino",s:"CA",acp:"Hispanic Centers",lat:34.1083,lng:-117.2898,pop:215000},
+  {n:"Espanola",s:"NM",acp:"Hispanic Centers",lat:36.0003,lng:-106.0714,pop:10000},
+  {n:"Henderson",s:"TN",acp:"Evangelical Hubs",lat:35.439,lng:-88.6414,pop:6200},
+  {n:"London",s:"KY",acp:"Evangelical Hubs",lat:37.129,lng:-84.0833,pop:8100},
+  {n:"Gallup",s:"NM",acp:"Native American Lands",lat:35.5281,lng:-108.7426,pop:22000},
+  {n:"Nome",s:"AK",acp:"Native American Lands",lat:64.5011,lng:-165.4064,pop:3800},
+  {n:"Marshalltown",s:"IA",acp:"Rural Middle America",lat:42.0494,lng:-92.9082,pop:27000},
+  {n:"Watertown",s:"SD",acp:"Rural Middle America",lat:44.8994,lng:-97.1148,pop:22000},
+  {n:"Emmett",s:"ID",acp:"Rural Middle America",lat:43.8727,lng:-116.4996,pop:6600},
+  {n:"Harvey",s:"ND",acp:"Aging Farmlands",lat:47.7689,lng:-99.9343,pop:1800},
+  {n:"Douglass",s:"KS",acp:"Aging Farmlands",lat:37.5167,lng:-97.0072,pop:1700},
+  {n:"Salt Lake City",s:"UT",acp:"LDS Enclaves",lat:40.7608,lng:-111.891,pop:200567},
+  {n:"Stone Harbor",s:"NJ",acp:"Graying America",lat:39.0523,lng:-74.7596,pop:866},
+  {n:"Rupert",s:"WV",acp:"Graying America",lat:37.9565,lng:-80.6895,pop:800},
+  {n:"Waterville",s:"ME",acp:"Graying America",lat:44.5523,lng:-69.6317,pop:16600},
+  {n:"Montpelier",s:"VT",acp:"Graying America",lat:44.2601,lng:-72.5754,pop:7500},
+  {n:"Dover",s:"DE",acp:"Military Posts",lat:39.1582,lng:-75.5244,pop:38079},
+  {n:"Colorado Springs",s:"CO",acp:"Military Posts",lat:38.8339,lng:-104.8214,pop:478221}
+];
+
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const mapBg=dark?'#1b2840':'#d4e6f1';
+const stFill=dark?'#253650':'#eaf2f8';
+const stStr=dark?'rgba(255,255,255,0.14)':'#b8cfe0';
+const outStr=dark?'rgba(255,255,255,0.28)':'#88b4d0';
+const labelCol=dark?'rgba(255,255,255,0.92)':'rgba(0,0,0,0.86)';
+const haloCol=dark?'rgba(27,40,64,0.97)':'rgba(234,242,248,0.97)';
+
+document.getElementById('map-svg').style.background=mapBg;
+
+const svg=d3.select('#map-svg');
+const proj=d3.geoAlbersUsa().scale(1180).translate([480,300]);
+const geoPath=d3.geoPath().projection(proj);
+
+// MAX_R halved from previous 22 → 11, cap at 2M
+const POP_CAP=2000000;
+const MAX_R=11;
+const MIN_R=6;
+const rSc=d3.scalePow().exponent(0.5).domain([0,POP_CAP]).range([0,MAX_R]);
+function getR(pop){ return Math.min(MAX_R, Math.max(MIN_R, rSc(pop))); }
+
+const tip=document.getElementById('tip');
+const holder=document.getElementById('map-holder');
+function showTip(ev,d){
+  const rect=holder.getBoundingClientRect();
+  let x=ev.clientX-rect.left+14, y=ev.clientY-rect.top-50;
+  if(x+210>rect.width) x=ev.clientX-rect.left-218;
+  if(y<0) y=ev.clientY-rect.top+12;
+  tip.style.left=x+'px'; tip.style.top=y+'px'; tip.style.display='block';
+  tip.innerHTML=`<strong>${d.n}, ${d.s}</strong><br/><span style="color:#aaa">${d.acp}</span><br/>Pop: ${d.pop.toLocaleString()}`;
+}
+
+Object.entries(COLORS).forEach(([type,col])=>{
+  const el=document.createElement('div');
+  el.className='li';
+  el.innerHTML=`<div class="ld" style="background:${col}"></div><span>${type}</span>`;
+  document.getElementById('aleg').appendChild(el);
+});
+
+const szsvg=d3.select('#szsvg');
+const szPops=[5000,100000,500000,2000000];
+const szLbls=['5K','100K','500K','2M+'];
+let xo=MIN_R+2;
+szPops.forEach((p,i)=>{
+  const r=getR(p);
+  szsvg.append('circle').attr('cx',xo).attr('cy',24).attr('r',r)
+    .attr('fill','#888').attr('fill-opacity',0.7)
+    .attr('stroke',dark?'rgba(255,255,255,0.4)':'#fff').attr('stroke-width',1);
+  szsvg.append('text').attr('x',xo).attr('y',50).attr('text-anchor','middle')
+    .attr('font-size',9).attr('fill',dark?'#aaa':'#666').text(szLbls[i]);
+  xo+=r*2+8;
+});
+
+const CH_W=5.5, LH=11;
+function textBBox(tx,ty,anchor,w){
+  if(anchor==='start') return {x1:tx,    y1:ty-LH, x2:tx+w,    y2:ty+2};
+  if(anchor==='end')   return {x1:tx-w,  y1:ty-LH, x2:tx,      y2:ty+2};
+                       return {x1:tx-w/2,y1:ty-LH, x2:tx+w/2,  y2:ty+2};
+}
+function circleHitsRect(cx,cy,cr,b){
+  const nx=Math.max(b.x1,Math.min(cx,b.x2));
+  const ny=Math.max(b.y1,Math.min(cy,b.y2));
+  const dx=cx-nx, dy=cy-ny;
+  return (dx*dx+dy*dy)<((cr+2)*(cr+2));
+}
+function candidates(px,py,r,w){
+  const p=4;
+  return [
+    {dx:r+p,       dy:4,          anchor:'start'},
+    {dx:-(r+p),    dy:4,          anchor:'end'},
+    {dx:0,         dy:-(r+p),     anchor:'middle'},
+    {dx:0,         dy:r+p+LH,     anchor:'middle'},
+    {dx:r*0.7+p,   dy:-(r*0.7+2), anchor:'start'},
+    {dx:-(r*0.7+p),dy:-(r*0.7+2), anchor:'end'},
+    {dx:r*0.7+p,   dy:r*0.7+LH,   anchor:'start'},
+    {dx:-(r*0.7+p),dy:r*0.7+LH,   anchor:'end'},
+  ].map(c=>({...c, tx:px+c.dx, ty:py+c.dy, bbox:textBBox(px+c.dx,py+c.dy,c.anchor,w)}));
+}
+
+d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(us=>{
+  svg.append('g').selectAll('path')
+    .data(topojson.feature(us,us.objects.states).features).join('path')
+    .attr('fill',stFill).attr('stroke',stStr).attr('stroke-width',0.5).attr('d',geoPath);
+
+  svg.append('path')
+    .datum(topojson.mesh(us,us.objects.states,(a,b)=>a===b))
+    .attr('fill','none').attr('stroke',outStr).attr('stroke-width',1.5).attr('d',geoPath);
+
+  const valid=cities
+    .filter(d=>proj([d.lng,d.lat])!==null)
+    .map(d=>{ const [x,y]=proj([d.lng,d.lat]); return {...d,x,y,r:getR(d.pop)}; })
+    .sort((a,b)=>b.pop-a.pop);
+
+  svg.append('g').selectAll('circle').data(valid).join('circle')
+    .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',d=>d.r)
+    .attr('fill',d=>COLORS[d.acp]).attr('fill-opacity',0.88)
+    .attr('stroke',dark?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.95)')
+    .attr('stroke-width',1.2).style('cursor','pointer')
+    .on('mouseover',function(ev,d){ d3.select(this).attr('stroke-width',3).attr('fill-opacity',1); showTip(ev,d); })
+    .on('mousemove',(ev,d)=>showTip(ev,d))
+    .on('mouseout',function(){ d3.select(this).attr('stroke-width',1.2).attr('fill-opacity',0.88); tip.style.display='none'; });
+
+  const labeled=valid.filter(d=>d.pop>150000);
+  const labG=svg.append('g');
+  const placedBBoxes=[];
+
+  labeled.forEach(d=>{
+    const w=d.n.length*CH_W;
+    const cands=candidates(d.x,d.y,d.r,w);
+    const others=valid.filter(o=>o.n!==d.n);
+
+    function score(cand){
+      let s=0;
+      others.forEach(o=>{ if(circleHitsRect(o.x,o.y,o.r,cand.bbox)) s+=10; });
+      placedBBoxes.forEach(pb=>{
+        const ox=Math.max(0,Math.min(cand.bbox.x2,pb.x2)-Math.max(cand.bbox.x1,pb.x1));
+        const oy=Math.max(0,Math.min(cand.bbox.y2,pb.y2)-Math.max(cand.bbox.y1,pb.y1));
+        if(ox>0&&oy>0) s+=5;
+      });
+      if(cand.bbox.x1<2||cand.bbox.x2>958||cand.bbox.y1<2||cand.bbox.y2>598) s+=20;
+      return s;
+    }
+
+    const best=cands.reduce((a,b)=>score(a)<=score(b)?a:b);
+    placedBBoxes.push(best.bbox);
+
+    labG.append('text')
+      .attr('x',best.tx).attr('y',best.ty).attr('text-anchor',best.anchor)
+      .attr('font-size',10).attr('font-weight',500)
+      .attr('fill',haloCol).attr('stroke',haloCol)
+      .attr('stroke-width',3.5).attr('stroke-linejoin','round')
+      .attr('paint-order','stroke').attr('pointer-events','none')
+      .text(d.n);
+    labG.append('text')
+      .attr('x',best.tx).attr('y',best.ty).attr('text-anchor',best.anchor)
+      .attr('font-size',10).attr('font-weight',500)
+      .attr('fill',labelCol).attr('pointer-events','none')
+      .text(d.n);
+  });
+});
+</script>

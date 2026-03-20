@@ -1,0 +1,539 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans,sans-serif)}
+#outer{padding:6px 0}
+#ctrls{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.cl{font-size:11px;font-weight:500;color:var(--color-text-secondary)}
+.cl+.cl{margin-left:8px}
+.tog{font-size:11px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md,8px);background:var(--color-background-primary);color:var(--color-text-primary);cursor:pointer}
+.tog.on{background:var(--color-background-secondary);border-color:var(--color-border-primary);font-weight:500}
+.tog:hover:not(.on){background:var(--color-background-secondary)}
+#wrap{display:flex;gap:14px;align-items:flex-start}
+#mh{flex:1;min-width:0;position:relative}
+#msv{width:100%;border-radius:8px;display:block;cursor:grab}
+#msv.panning{cursor:grabbing}
+/* zoom controls */
+#zoom-btns{position:absolute;bottom:10px;right:10px;display:flex;flex-direction:column;gap:3px;z-index:20}
+.zb{width:28px;height:28px;border:0.5px solid var(--color-border-secondary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary);font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:.85}
+.zb:hover{opacity:1;background:var(--color-background-secondary)}
+.zb:active{transform:scale(.95)}
+#zoom-level{position:absolute;bottom:10px;left:10px;font-size:10px;color:var(--color-text-secondary);background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:5px;padding:3px 7px;opacity:.8;pointer-events:none;z-index:20}
+/* tooltip */
+.tip{position:absolute;background:rgba(10,16,28,.94);color:#fff;padding:8px 12px;border-radius:6px;font-size:11px;line-height:1.65;display:none;z-index:50;max-width:220px;white-space:nowrap;pointer-events:none}
+.tip-pin{pointer-events:auto}
+.tip-close{float:right;margin-left:10px;opacity:.6;cursor:pointer;font-size:13px;line-height:1}
+.tip-close:hover{opacity:1}
+/* legend */
+#leg{width:204px;flex-shrink:0}
+.ls{border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--color-background-primary)}
+.lt{font-size:10px;font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center}
+.leg-acts{display:flex;gap:8px}
+.lact{font-size:10px;color:var(--color-text-secondary);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.lact:hover{color:var(--color-text-primary)}
+.chip{display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:4px;font-size:11px;color:var(--color-text-primary);cursor:pointer;user-select:none;transition:opacity .15s}
+.chip.off{opacity:.3}
+.chip:hover{background:var(--color-background-secondary)}
+.cdot{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.2)}
+@media(max-width:680px){#wrap{flex-direction:column}#leg{width:100%}}
+</style>
+
+<div id="outer">
+  <div id="ctrls">
+    <span class="cl">Labels:</span>
+    <button class="tog on" id="b-key">Key cities</button>
+    <button class="tog" id="b-all">All cities (&gt;100K)</button>
+    <span class="cl">Dot size:</span>
+    <button class="tog on" id="b-pop">By population</button>
+    <button class="tog" id="b-uni">Uniform</button>
+  </div>
+  <div id="wrap">
+    <div id="mh">
+      <svg id="msv" viewBox="0 0 960 600"></svg>
+      <div id="zoom-btns">
+        <button class="zb" id="z-in"  title="Zoom in">+</button>
+        <button class="zb" id="z-rst" title="Reset zoom" style="font-size:11px">⌂</button>
+        <button class="zb" id="z-out" title="Zoom out">−</button>
+      </div>
+      <div id="zoom-level">100%</div>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div id="leg">
+      <div class="ls">
+        <div class="lt">
+          <span>ACP community type</span>
+          <span class="leg-acts">
+            <span class="lact" id="sel-all">all</span>
+            <span class="lact" id="sel-none">none</span>
+          </span>
+        </div>
+        <div id="chips"></div>
+      </div>
+      <div class="ls">
+        <div class="lt">Population (2020 census est.)</div>
+        <svg id="szl" width="180" height="52"></svg>
+        <div style="font-size:10px;color:var(--color-text-secondary);margin-top:4px">Scroll/pinch to zoom · drag to pan · click dot for details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+const COLORS={
+  "Big Cities":"#1565c0","Urban Suburbs":"#039be5","College Towns":"#00897b",
+  "Exurbs":"#43a047","Middle Suburbs":"#8bc34a","Working Class Country":"#fb8c00",
+  "African American South":"#8e24aa","Hispanic Centers":"#e53935",
+  "Evangelical Hubs":"#795548","Native American Lands":"#ff7043",
+  "Rural Middle America":"#546e7a","Aging Farmlands":"#f9a825",
+  "LDS Enclaves":"#3949ab","Graying America":"#90a4ae","Military Posts":"#558b2f"
+};
+
+const RAW=[
+  ["New York City","NY","Big Cities",40.7128,-74.006,8336817],
+  ["Los Angeles","CA","Big Cities",34.0522,-118.2437,3979576],
+  ["Chicago","IL","Big Cities",41.8781,-87.6298,2696555],
+  ["Houston","TX","Big Cities",29.7604,-95.3698,2304580],
+  ["Philadelphia","PA","Big Cities",39.9526,-75.1652,1603797],
+  ["Washington","DC","Big Cities",38.9072,-77.0369,689545],
+  ["Seattle","WA","Big Cities",47.6062,-122.3321,737255],
+  ["Las Vegas","NV","Big Cities",36.1699,-115.1398,641903],
+  ["Atlanta","GA","Big Cities",33.749,-84.388,498715],
+  ["Minneapolis","MN","Big Cities",44.9778,-93.265,429606],
+  ["Miami","FL","Big Cities",25.7617,-80.1918,442241],
+  ["Phoenix","AZ","Big Cities",33.4484,-112.074,1608139],
+  ["Dallas","TX","Big Cities",32.7767,-96.797,1304379],
+  ["San Diego","CA","Big Cities",32.7157,-117.1611,1386932],
+  ["Detroit","MI","Big Cities",42.3314,-83.0458,639111],
+  ["Mesa","AZ","Urban Suburbs",33.4152,-111.8315,504258],
+  ["Baltimore","MD","Urban Suburbs",39.2904,-76.6122,585708],
+  ["Vienna","VA","Urban Suburbs",38.9012,-77.2653,16486],
+  ["Hartford","CT","Urban Suburbs",41.7658,-72.6851,121054],
+  ["Greenville","SC","Urban Suburbs",34.8526,-82.394,70720],
+  ["Providence","RI","Urban Suburbs",41.824,-71.4128,190934],
+  ["Aurora","CO","Urban Suburbs",39.7294,-104.8319,366623],
+  ["Irvine","CA","Urban Suburbs",33.6846,-117.8265,307670],
+  ["Arlington","VA","Urban Suburbs",38.8816,-77.091,236842],
+  ["Ann Arbor","MI","College Towns",42.2808,-83.743,123851],
+  ["Athens","GA","College Towns",33.9519,-83.3576,127947],
+  ["Northampton","MA","College Towns",42.3251,-72.6412,28549],
+  ["Lincoln","NE","College Towns",40.8136,-96.7026,289102],
+  ["Gainesville","FL","College Towns",29.6516,-82.3248,133997],
+  ["Flagstaff","AZ","College Towns",35.1983,-111.6513,76831],
+  ["Madison","WI","College Towns",43.0731,-89.4012,269840],
+  ["Chapel Hill","NC","College Towns",35.9132,-79.0558,61960],
+  ["State College","PA","College Towns",40.7934,-77.86,42034],
+  ["Siler City","NC","Exurbs",35.726,-79.4647,8006],
+  ["Lancaster","PA","Exurbs",40.0379,-76.3055,57960],
+  ["Concord","NH","Exurbs",43.2081,-71.5376,43976],
+  ["Portland","ME","Exurbs",43.6591,-70.2568,68408],
+  ["Billings","MT","Exurbs",45.7833,-108.5007,117116],
+  ["Westminster","MD","Exurbs",39.5751,-76.9961,19523],
+  ["Bend","OR","Exurbs",44.0582,-121.3153,97590],
+  ["Rock Springs","WY","Exurbs",41.5875,-109.2029,22965],
+  ["Frisco","TX","Exurbs",33.1507,-96.8236,200490],
+  ["Surprise","AZ","Exurbs",33.6292,-112.3679,143502],
+  ["Mount Pleasant","SC","Exurbs",32.8323,-79.8283,91684],
+  ["Lee's Summit","MO","Exurbs",38.9108,-94.3822,102573],
+  ["Green Bay","WI","Middle Suburbs",44.5133,-88.0133,107395],
+  ["Honolulu","HI","Middle Suburbs",21.3069,-157.8583,350964],
+  ["Pevely","MO","Middle Suburbs",38.2831,-90.396,6000],
+  ["Anderson","IN","Middle Suburbs",40.1053,-85.6803,54000],
+  ["Flint","MI","Middle Suburbs",43.0125,-83.6875,81252],
+  ["Naperville","IL","Middle Suburbs",41.7508,-88.1535,148449],
+  ["Yonkers","NY","Middle Suburbs",40.9312,-73.8988,211569],
+  ["Overland Park","KS","Middle Suburbs",38.9822,-94.6708,197238],
+  ["St Petersburg","FL","Middle Suburbs",27.7676,-82.6403,258308],
+  ["Chandler","OK","Working Class Country",35.702,-96.8809,3100],
+  ["Akron","OH","Working Class Country",41.0814,-81.519,190469],
+  ["Monticello","AR","Working Class Country",33.6287,-91.7929,9600],
+  ["Youngstown","OH","Working Class Country",41.0998,-80.6495,60068],
+  ["Huntington","WV","Working Class Country",38.4192,-82.4452,46842],
+  ["Pueblo","CO","Working Class Country",38.2544,-104.6091,111127],
+  ["Lima","OH","Working Class Country",40.7426,-84.1052,36722],
+  ["Jackson","MS","African American South",32.2988,-90.1848,153701],
+  ["Birmingham","AL","African American South",33.5186,-86.8104,212237],
+  ["Goldsboro","NC","African American South",35.3849,-77.9925,34984],
+  ["Baton Rouge","LA","African American South",30.4515,-91.1871,227470],
+  ["Montgomery","AL","African American South",32.3668,-86.3,199518],
+  ["Savannah","GA","African American South",32.0835,-81.0998,147780],
+  ["Shreveport","LA","African American South",32.5252,-93.7502,187593],
+  ["Columbia","SC","African American South",34.0007,-81.0348,136632],
+  ["San Antonio","TX","Hispanic Centers",29.4241,-98.4936,1434625],
+  ["El Paso","TX","Hispanic Centers",31.7619,-106.485,678815],
+  ["San Bernardino","CA","Hispanic Centers",34.1083,-117.2898,215000],
+  ["Espanola","NM","Hispanic Centers",36.0003,-106.0714,10000],
+  ["McAllen","TX","Hispanic Centers",26.2034,-98.23,142696],
+  ["Fresno","CA","Hispanic Centers",36.7378,-119.7871,542107],
+  ["Yuma","AZ","Hispanic Centers",32.6927,-114.6277,93064],
+  ["Santa Ana","CA","Hispanic Centers",33.7455,-117.8677,310227],
+  ["Henderson","TN","Evangelical Hubs",35.439,-88.6414,6200],
+  ["London","KY","Evangelical Hubs",37.129,-84.0833,8100],
+  ["Springdale","AR","Evangelical Hubs",36.1867,-94.1288,86209],
+  ["Johnson City","TN","Evangelical Hubs",36.3134,-82.3535,71046],
+  ["Dothan","AL","Evangelical Hubs",31.2232,-85.3905,72169],
+  ["Owensboro","KY","Evangelical Hubs",37.7719,-87.1111,60990],
+  ["Gallup","NM","Native American Lands",35.5281,-108.7426,22000],
+  ["Nome","AK","Native American Lands",64.5011,-165.4064,3800],
+  ["Window Rock","AZ","Native American Lands",35.6675,-109.0456,2710],
+  ["Farmington","NM","Native American Lands",36.7281,-108.2087,45877],
+  ["Rapid City","SD","Native American Lands",44.0805,-103.231,74703],
+  ["Marshalltown","IA","Rural Middle America",42.0494,-92.9082,27000],
+  ["Watertown","SD","Rural Middle America",44.8994,-97.1148,22000],
+  ["Emmett","ID","Rural Middle America",43.8727,-116.4996,6600],
+  ["Traverse City","MI","Rural Middle America",44.7631,-85.6206,15313],
+  ["Prescott","AZ","Rural Middle America",34.54,-112.4685,45827],
+  ["Hot Springs","AR","Rural Middle America",34.5037,-93.0552,38797],
+  ["Branson","MO","Rural Middle America",36.6437,-93.2185,12000],
+  ["Harvey","ND","Aging Farmlands",47.7689,-99.9343,1800],
+  ["Douglass","KS","Aging Farmlands",37.5167,-97.0072,1700],
+  ["Salt Lake City","UT","LDS Enclaves",40.7608,-111.891,200567],
+  ["Provo","UT","LDS Enclaves",40.2338,-111.6585,115264],
+  ["St George","UT","LDS Enclaves",37.1041,-113.5841,95342],
+  ["Rexburg","ID","LDS Enclaves",43.8258,-111.7897,28000],
+  ["Stone Harbor","NJ","Graying America",39.0523,-74.7596,866],
+  ["Rupert","WV","Graying America",37.9565,-80.6895,800],
+  ["Waterville","ME","Graying America",44.5523,-69.6317,16600],
+  ["Montpelier","VT","Graying America",44.2601,-72.5754,7500],
+  ["Dover","DE","Military Posts",39.1582,-75.5244,38079],
+  ["Colorado Springs","CO","Military Posts",38.8339,-104.8214,478221],
+  ["Killeen","TX","Military Posts",31.1171,-97.7278,153095],
+  ["Fayetteville","NC","Military Posts",35.0527,-78.8784,208501],
+  ["Norfolk","VA","Military Posts",36.8508,-76.2859,238005],
+  ["Clarksville","TN","Military Posts",36.5298,-87.3595,166722],
+];
+
+const KEY_SET=new Set([
+  "New York City","Los Angeles","Chicago","Houston","Philadelphia","Washington",
+  "Seattle","Las Vegas","Miami","Atlanta","Minneapolis",
+  "Phoenix","Dallas","San Diego","Detroit",
+  "San Antonio","El Paso","Fresno","Santa Ana",
+  "Baltimore","Aurora","Providence",
+  "Salt Lake City","Baton Rouge","Birmingham","Montgomery",
+  "Lincoln","Madison","Akron","Pueblo",
+  "Colorado Springs","Honolulu","Fayetteville","Norfolk","Killeen",
+  "Shreveport","Columbia",
+]);
+
+// ── CONFIG & STATE ───────────────────────────────────────
+const CFG={popCap:2e6,maxR:11,minR:6,uniformR:8,fs:10,lh:12,pad:5,vw:960,vh:600};
+const state={activeTypes:new Set(Object.keys(COLORS)),allLabels:false,popSizing:true,pinnedCity:null,transform:d3.zoomIdentity};
+
+const rSc=d3.scalePow().exponent(0.5).domain([0,CFG.popCap]).range([0,CFG.maxR]);
+function getR(pop){return state.popSizing?Math.min(CFG.maxR,Math.max(CFG.minR,rSc(pop))):CFG.uniformR;}
+
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const mapBg=dark?'#1b2840':'#d4e6f1';
+const stFill=dark?'#253650':'#eaf2f8';
+const stStr=dark?'rgba(255,255,255,.14)':'#b8cfe0';
+const outStr=dark?'rgba(255,255,255,.28)':'#88b4d0';
+const labelCol=dark?'rgba(255,255,255,.92)':'rgba(0,0,0,.86)';
+const haloCol=dark?'rgba(27,40,64,.97)':'rgba(230,240,248,.97)';
+const connCol=dark?'rgba(255,255,255,.22)':'rgba(0,0,0,.2)';
+
+const svgEl=document.getElementById('msv');
+const svg=d3.select(svgEl);
+const proj=d3.geoAlbersUsa().scale(1180).translate([480,300]);
+const geoPath=d3.geoPath().projection(proj);
+
+const CITIES=RAW.map(([n,s,acp,lat,lng,pop])=>{
+  const pt=proj([lng,lat]);
+  return {n,s,acp,lat,lng,pop,x:pt?pt[0]:null,y:pt?pt[1]:null};
+}).filter(d=>d.x!==null).sort((a,b)=>b.pop-a.pop);
+
+// ── TEXT MEASUREMENT ────────────────────────────────────
+const _meas={};
+function measureW(text){
+  if(_meas[text]) return _meas[text];
+  const t=svg.append('text').attr('font-size',CFG.fs).attr('font-weight',500).attr('visibility','hidden').text(text);
+  const w=t.node().getComputedTextLength()||text.length*5.8;
+  t.remove(); _meas[text]=w; return w;
+}
+
+// ── LABEL PLACEMENT ─────────────────────────────────────
+function textBBox(tx,ty,anchor,w){
+  const x1=anchor==='start'?tx:anchor==='end'?tx-w:tx-w/2;
+  return {x1,y1:ty-CFG.lh,x2:x1+w,y2:ty+2};
+}
+function circleHitsRect(cx,cy,cr,b){
+  const nx=Math.max(b.x1,Math.min(cx,b.x2)),ny=Math.max(b.y1,Math.min(cy,b.y2));
+  return (cx-nx)**2+(cy-ny)**2<(cr+1)**2;
+}
+function rectsOverlap(a,b){return !(a.x2<b.x1||b.x2<a.x1||a.y2<b.y1||b.y2<a.y1);}
+
+function computePlacements(toLabel,allVisible){
+  const placed=[];
+  toLabel.forEach(city=>{
+    const w=measureW(city.n),r=city.r,p=CFG.pad,lh=CFG.lh;
+    const cands=[
+      {dx:r+p,    dy:lh/3,    anchor:'start'},
+      {dx:-(r+p), dy:lh/3,    anchor:'end'},
+      {dx:0,      dy:-(r+p),  anchor:'middle'},
+      {dx:0,      dy:r+p+lh,  anchor:'middle'},
+      {dx:r*.7+p, dy:-r*.7,   anchor:'start'},
+      {dx:-r*.7-p,dy:-r*.7,   anchor:'end'},
+      {dx:r*.7+p, dy:r*.7+lh, anchor:'start'},
+      {dx:-r*.7-p,dy:r*.7+lh, anchor:'end'},
+    ].map(c=>({...c,tx:city.x+c.dx,ty:city.y+c.dy,bbox:textBBox(city.x+c.dx,city.y+c.dy,c.anchor,w)}));
+    let best=null,bestScore=Infinity;
+    cands.forEach(cand=>{
+      let s=0;
+      const b=cand.bbox;
+      if(b.x1<2||b.x2>CFG.vw-2||b.y1<2||b.y2>CFG.vh-2) s+=30;
+      allVisible.forEach(dot=>{if(circleHitsRect(dot.x,dot.y,dot.r+1,b)) s+=12;});
+      placed.forEach(pl=>{if(rectsOverlap(b,pl.bbox)) s+=9;});
+      if(s<bestScore){bestScore=s;best=cand;}
+    });
+    if(best) placed.push({city,w,...best});
+  });
+  return placed;
+}
+
+// ── ZOOM ────────────────────────────────────────────────
+let zoomG; // the single group that gets transformed
+
+const zoomBehavior=d3.zoom()
+  .scaleExtent([1,12])
+  .translateExtent([[0,0],[CFG.vw,CFG.vh]])
+  .on('start',()=>svgEl.classList.add('panning'))
+  .on('zoom',(ev)=>{
+    state.transform=ev.transform;
+    zoomG.attr('transform',ev.transform);
+    // Scale dots and labels inversely so they stay readable when zoomed in
+    const k=ev.transform.k;
+    // Dots: shrink radius proportionally but not below 3px visual
+    svg.selectAll('.points-layer circle')
+      .attr('r',d=>Math.max(3/k, getR(d.pop)/k))
+      .attr('stroke-width',1.2/k);
+    // Labels: scale font inversely
+    svg.selectAll('.labels-layer text')
+      .attr('font-size',CFG.fs/k)
+      .attr('stroke-width',3.5/k);
+    svg.selectAll('.connectors-layer line')
+      .attr('stroke-width',0.8/k);
+    // Update zoom indicator
+    document.getElementById('zoom-level').textContent=Math.round(k*100)+'%';
+  })
+  .on('end',()=>svgEl.classList.remove('panning'));
+
+svg.call(zoomBehavior);
+
+// Disable double-click zoom (we handle zoom via buttons + scroll)
+svg.on('dblclick.zoom',null);
+
+function zoomTo(factor){
+  svg.transition().duration(300).call(zoomBehavior.scaleBy,factor);
+}
+function zoomReset(){
+  svg.transition().duration(400).call(zoomBehavior.transform,d3.zoomIdentity);
+}
+
+// ── TOOLTIP ─────────────────────────────────────────────
+const tipEl=document.getElementById('tip');
+const holder=document.getElementById('mh');
+
+// Convert SVG coords → screen coords accounting for zoom transform
+function svgToScreen(svgX,svgY){
+  const t=state.transform;
+  // zoomed SVG point in viewBox space
+  const vbX=t.applyX(svgX), vbY=t.applyY(svgY);
+  // map viewBox → rendered pixel rect
+  const bb=svgEl.getBoundingClientRect();
+  const scaleX=bb.width/CFG.vw, scaleY=bb.height/CFG.vh;
+  const hr=holder.getBoundingClientRect();
+  return {
+    x:vbX*scaleX - (hr.left - bb.left) + 10,
+    y:vbY*scaleY - (hr.top  - bb.top)  - 46
+  };
+}
+
+function posFromEvent(ev){
+  const r=holder.getBoundingClientRect();
+  let x=(ev.clientX??ev.touches?.[0]?.clientX??0)-r.left+14;
+  let y=(ev.clientY??ev.touches?.[0]?.clientY??0)-r.top-48;
+  if(x+220>r.width) x-=240;
+  if(y<0) y+=60;
+  return {x,y};
+}
+function showTip(city,x,y,pinned){
+  // clamp so it doesn't fall off holder
+  const hr=holder.getBoundingClientRect();
+  x=Math.max(4,Math.min(x,hr.width-228));
+  y=Math.max(4,y);
+  tipEl.style.display='block';
+  tipEl.style.left=x+'px'; tipEl.style.top=y+'px';
+  if(pinned){
+    tipEl.classList.add('tip-pin');
+    tipEl.innerHTML=`<span class="tip-close" id="tip-x">✕</span><strong>${city.n}, ${city.s}</strong><br/><span style="color:#aaa">${city.acp}</span><br/>Pop: ${city.pop.toLocaleString()}`;
+    document.getElementById('tip-x').onclick=()=>{state.pinnedCity=null;hideTip();};
+  } else {
+    tipEl.classList.remove('tip-pin');
+    tipEl.innerHTML=`<strong>${city.n}, ${city.s}</strong><br/><span style="color:#aaa">${city.acp}</span><br/>Pop: ${city.pop.toLocaleString()}`;
+  }
+}
+function hideTip(){if(state.pinnedCity) return; tipEl.style.display='none';}
+
+// ── DRAW BASE MAP ────────────────────────────────────────
+function drawBaseMap(us){
+  svgEl.style.background=mapBg;
+  // Single zoom group wraps everything
+  zoomG=svg.append('g').attr('class','zoom-g');
+  zoomG.append('g').attr('class','states').selectAll('path')
+    .data(topojson.feature(us,us.objects.states).features).join('path')
+    .attr('fill',stFill).attr('stroke',stStr).attr('stroke-width',.5).attr('d',geoPath);
+  zoomG.append('path').attr('class','border')
+    .datum(topojson.mesh(us,us.objects.states,(a,b)=>a===b))
+    .attr('fill','none').attr('stroke',outStr).attr('stroke-width',1.5).attr('d',geoPath);
+  zoomG.append('g').attr('class','connectors-layer');
+  zoomG.append('g').attr('class','points-layer');
+  zoomG.append('g').attr('class','labels-layer');
+}
+
+// ── DRAW POINTS ──────────────────────────────────────────
+function drawPoints(){
+  const k=state.transform.k;
+  const visible=CITIES.filter(d=>state.activeTypes.has(d.acp)).map(d=>({...d,r:getR(d.pop)}));
+  const g=svg.select('.points-layer');
+  g.selectAll('circle').remove();
+  g.selectAll('circle').data(visible,d=>d.n).join('circle')
+    .attr('cx',d=>d.x).attr('cy',d=>d.y)
+    .attr('r',d=>Math.max(3/k,d.r/k))
+    .attr('fill',d=>COLORS[d.acp]).attr('fill-opacity',.88)
+    .attr('stroke',dark?'rgba(255,255,255,.6)':'rgba(255,255,255,.92)')
+    .attr('stroke-width',1.2/k)
+    .attr('tabindex',0).attr('role','button')
+    .attr('aria-label',d=>`${d.n}, ${d.s}: ${d.acp}, population ${d.pop.toLocaleString()}`)
+    .style('cursor','pointer')
+    .on('mouseover',(ev,d)=>{
+      if(state.pinnedCity) return;
+      const {x,y}=posFromEvent(ev); showTip(d,x,y,false);
+      d3.select(ev.currentTarget).attr('fill-opacity',1).attr('stroke-width',2.5/k);
+    })
+    .on('mousemove',(ev)=>{
+      if(state.pinnedCity) return;
+      const {x,y}=posFromEvent(ev); tipEl.style.left=x+'px'; tipEl.style.top=y+'px';
+    })
+    .on('mouseout',(ev,d)=>{
+      if(!state.pinnedCity) hideTip();
+      d3.select(ev.currentTarget).attr('fill-opacity',.88).attr('stroke-width',1.2/k);
+    })
+    .on('click',(ev,d)=>{
+      ev.stopPropagation();
+      if(state.pinnedCity===d){state.pinnedCity=null;hideTip();return;}
+      state.pinnedCity=d;
+      const {x,y}=posFromEvent(ev); showTip(d,x,y,true);
+    })
+    .on('touchstart',(ev,d)=>{
+      ev.preventDefault();
+      if(state.pinnedCity===d){state.pinnedCity=null;hideTip();return;}
+      state.pinnedCity=d;
+      const {x,y}=posFromEvent(ev); showTip(d,x,y,true);
+    },{passive:false})
+    .on('keydown',(ev,d)=>{
+      if(ev.key==='Enter'||ev.key===' '){
+        ev.preventDefault();
+        if(state.pinnedCity===d){state.pinnedCity=null;hideTip();return;}
+        state.pinnedCity=d;
+        const {x,y}=svgToScreen(d.x,d.y); showTip(d,x,y,true);
+      }
+    })
+    .on('focus',(ev,d)=>{
+      if(!state.pinnedCity){const {x,y}=svgToScreen(d.x,d.y);showTip(d,x,y,false);}
+    })
+    .on('blur',()=>{if(!state.pinnedCity) hideTip();});
+  return visible;
+}
+
+// ── DRAW LABELS ──────────────────────────────────────────
+function drawLabels(visible){
+  const k=state.transform.k;
+  svg.select('.connectors-layer').selectAll('*').remove();
+  svg.select('.labels-layer').selectAll('*').remove();
+  const toLabel=visible.filter(d=>state.allLabels?d.pop>=100000:KEY_SET.has(d.n));
+  const placements=computePlacements(toLabel,visible);
+  const cg=svg.select('.connectors-layer'),lg=svg.select('.labels-layer');
+  placements.forEach(({city,tx,ty,anchor,w})=>{
+    const labelCx=anchor==='start'?tx+w/2:anchor==='end'?tx-w/2:tx;
+    const labelCy=ty-CFG.lh/2;
+    const dx=labelCx-city.x,dy=labelCy-city.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist>city.r+8){
+      const sx=city.x+dx/dist*city.r,sy=city.y+dy/dist*city.r;
+      cg.append('line').attr('x1',sx).attr('y1',sy).attr('x2',tx).attr('y2',ty-CFG.lh/3)
+        .attr('stroke',connCol).attr('stroke-width',.8/k).attr('pointer-events','none');
+    }
+    lg.append('text').attr('x',tx).attr('y',ty).attr('text-anchor',anchor)
+      .attr('font-size',CFG.fs/k).attr('font-weight',500)
+      .attr('fill',haloCol).attr('stroke',haloCol).attr('stroke-width',3.5/k)
+      .attr('stroke-linejoin','round').attr('paint-order','stroke').attr('pointer-events','none')
+      .text(city.n);
+    lg.append('text').attr('x',tx).attr('y',ty).attr('text-anchor',anchor)
+      .attr('font-size',CFG.fs/k).attr('font-weight',500)
+      .attr('fill',labelCol).attr('pointer-events','none').text(city.n);
+  });
+}
+
+// ── DRAW LEGEND ──────────────────────────────────────────
+function drawLegend(){
+  const chips=document.getElementById('chips');
+  chips.innerHTML='';
+  Object.entries(COLORS).forEach(([type,col])=>{
+    const el=document.createElement('div');
+    el.className='chip'+(state.activeTypes.has(type)?'':' off');
+    el.innerHTML=`<div class="cdot" style="background:${col}"></div><span>${type}</span>`;
+    el.onclick=()=>{
+      if(state.activeTypes.has(type)) state.activeTypes.delete(type);
+      else state.activeTypes.add(type);
+      el.classList.toggle('off',!state.activeTypes.has(type));
+      render();
+    };
+    chips.appendChild(el);
+  });
+  const szSvg=d3.select('#szl'); szSvg.selectAll('*').remove();
+  const szData=[[5000,'5K'],[100000,'100K'],[500000,'500K'],[2000000,'2M+']];
+  let xo=7;
+  szData.forEach(([pop,lbl])=>{
+    const r=getR(pop);
+    szSvg.append('circle').attr('cx',xo+r).attr('cy',22).attr('r',r)
+      .attr('fill','#888').attr('fill-opacity',.7)
+      .attr('stroke',dark?'rgba(255,255,255,.4)':'rgba(255,255,255,.9)').attr('stroke-width',1);
+    szSvg.append('text').attr('x',xo+r).attr('y',46).attr('text-anchor','middle')
+      .attr('font-size',9).attr('fill',dark?'#aaa':'#666').text(lbl);
+    xo+=r*2+12;
+  });
+}
+
+// ── RENDER ───────────────────────────────────────────────
+function render(){
+  const visible=drawPoints();
+  drawLabels(visible);
+  drawLegend();
+}
+
+// ── CONTROLS ─────────────────────────────────────────────
+function attachControls(){
+  function togPair(aId,bId,setFn){
+    document.getElementById(aId).onclick=()=>{setFn(false);document.getElementById(aId).classList.add('on');document.getElementById(bId).classList.remove('on');render();};
+    document.getElementById(bId).onclick=()=>{setFn(true);document.getElementById(bId).classList.add('on');document.getElementById(aId).classList.remove('on');render();};
+  }
+  togPair('b-key','b-all',v=>state.allLabels=v);
+  togPair('b-pop','b-uni',v=>{state.popSizing=!v;});
+  document.getElementById('sel-all').onclick=()=>{Object.keys(COLORS).forEach(t=>state.activeTypes.add(t));render();};
+  document.getElementById('sel-none').onclick=()=>{state.activeTypes.clear();render();};
+  document.getElementById('z-in').onclick=()=>zoomTo(2);
+  document.getElementById('z-out').onclick=()=>zoomTo(0.5);
+  document.getElementById('z-rst').onclick=()=>zoomReset();
+  svgEl.addEventListener('click',(ev)=>{
+    if(ev.target.tagName==='circle') return;
+    state.pinnedCity=null; hideTip();
+  });
+}
+
+// ── INIT ─────────────────────────────────────────────────
+d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(us=>{
+  drawBaseMap(us);
+  attachControls();
+  render();
+});
+</script>
